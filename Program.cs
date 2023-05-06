@@ -1,11 +1,8 @@
 ﻿
+using SPIAPI;
 using SupportBot.Service;
-using SupportBot.Service.Models;
-using System;
-using System.Threading;
-using System.Threading.Tasks;
+using System.Net.Sockets;
 using Telegram.Bot;
-using Telegram.Bot.Args;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 using Telegram.Bot.Types.ReplyMarkups;
@@ -20,12 +17,19 @@ namespace SupportBot
 
         private static SupportService supportService;
 
+        private static Service.User? user;
+        
+        private static Ticket? ticket;
+
         static async Task Main(string[] args)
         {
-            supportService = new SupportService(supportApiBaseUrl);
-            _ = await supportService.SendAuthModelAsync("Telegram", "Telegram");
+            HttpClient client = new HttpClient();
+
+            supportService = new SupportService(client, supportApiBaseUrl);
+            _ = await supportService.LoginAsync("Telegram", "Telegram");
 
             botClient = new TelegramBotClient("6198831431:AAHOF8x89rppG27arCEQwwWXtYBDG6OPN_4");
+
 
             var me = await botClient.GetMeAsync();
             Console.WriteLine($"Start listening for @{me.Username}");
@@ -42,12 +46,22 @@ namespace SupportBot
         {
             if (update.Type == UpdateType.Message && update.Message.Type == MessageType.Text)
             {
-                var chatId = update.Message.Chat.Id;
+
+                string chatId = update.Message.Chat.Id.ToString();
+                string username = update.Message.Chat.Username;
+
+                if (ticket != null && user != null && ticket.AssignedToUserId != null)
+                {
+                    await supportService.SendMessageToTicketAsync(ticket.Id, user.Id, update.Message.Text);
+                }
 
                 if (update.Message.Text == "/start")
                 {
+                    await supportService.CreateTelegramUserAsync(username, chatId);
+
+                    user = await supportService.GetUserByTelegramIdAsync(chatId);
                     var keyboard = new InlineKeyboardMarkup(new[]
-{
+                    {
                         new[]
                         {
                             InlineKeyboardButton.WithCallbackData("Вызвать сотрудника", "call_support"),
@@ -61,25 +75,33 @@ namespace SupportBot
             }
             else if (update.Type == UpdateType.CallbackQuery)
             {
-                var chatId = update.CallbackQuery.Message.Chat.Id;
+                string chatId = update.CallbackQuery.Message.Chat.Id.ToString();
 
-                if (update.CallbackQuery.Data == "call_support")
+                if (update.CallbackQuery.Data == "call_support")    
                 {
-                    var user = await supportService.GetUserByTelegramIdAsync(chatId.ToString());
-                    if (user != null && user.TicketId != null)
+                    
+                    if (user != null && user.TicketId == null)
                     {
-                        await bot.SendTextMessageAsync(chatId, "Вы не можете иметь больше 1-ого тикета. Дождитесь сотрудника, чтобы он закрыл вам тикет.", cancellationToken: cancellationToken);
+                        await supportService.CreateTicket(user.Id, "Просто заголовок", "Просто описание");
+
+                        Console.WriteLine(user.TicketId.Value);
+                        ticket = await supportService.GetTicketByIdAsync(user.TicketId.Value);
+
+
+                        await bot.SendTextMessageAsync(chatId,
+                            "Один из наших сотрудников свяжется с вами в ближайшее время.",
+                            cancellationToken: cancellationToken);
                     }
                     else
                     {
-                        var message = "Один из наших сотрудников свяжется с вами в ближайшее время.";
-                        await bot.SendTextMessageAsync(chatId, message, cancellationToken: cancellationToken);
+                        await bot.SendTextMessageAsync(chatId, "Вы не можете иметь больше 1-ого тикета. Дождитесь сотрудника, чтобы он закрыл вам тикет.",
+                            cancellationToken: cancellationToken);
                     }
                 }
             }
         }
 
-        static Task HandleErrorAsync(ITelegramBotClient botClient, Exception exception, CancellationToken cancellationToken)
+        public static Task HandleErrorAsync(ITelegramBotClient botClient, Exception exception, CancellationToken cancellationToken)
         {
             Console.WriteLine(exception.Message);
             return Task.CompletedTask;
