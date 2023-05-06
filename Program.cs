@@ -28,7 +28,7 @@ namespace SupportBot
             supportService = new SupportService(client, supportApiBaseUrl);
             _ = await supportService.LoginAsync("Telegram", "Telegram");
 
-            botClient = new TelegramBotClient("6198831431:AAHOF8x89rppG27arCEQwwWXtYBDG6OPN_4");
+            botClient = new TelegramBotClient("");
 
 
             var me = await botClient.GetMeAsync();
